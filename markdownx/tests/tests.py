@@ -1,10 +1,10 @@
+from contextlib import contextmanager
+from unittest import mock
+
 import os
 import re
-from django.test import TestCase
-try:
-    from django.urls import reverse
-except ImportError:  # Djanago < 2.0
-    from django.core.urlresolvers import reverse
+from django.test import TestCase, override_settings
+from django.urls import reverse
 
 
 class SimpleTest(TestCase):
@@ -13,18 +13,38 @@ class SimpleTest(TestCase):
         response = self.client.get('/testview/')
         self.assertEqual(response.status_code, 200)
 
-    def test_upload(self):
-        url = reverse('markdownx_upload')
+    @contextmanager
+    def _get_image_fp(self):
         with open('markdownx/tests/static/django-markdownx-preview.png', 'rb') as fp:
-            response = self.client.post(url, {'image': fp}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+            yield fp
 
-        try:
-            json = response.json()
-        except AttributeError:  # Django < 1.9
-            import json
-            json = json.loads(response.content.decode('utf-8'))
+    def test_upload_anonymous_fails(self):
+        url = reverse('markdownx_upload')
+
+        # Test that image upload fails for an anonymous user when
+        # MARKDOWNX_UPLOAD_ALLOW_ANONYMOUS is the default False.
+        with self._get_image_fp() as fp:
+            response = self.client.post(url, {'image': fp}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 403)
+
+    def test_upload_anonymous_succeeds_with_setting(self):
+        """
+        Ensures that uploads succeed when MARKDOWNX_UPLOAD_ALLOW_ANONYMOUS
+        is True. This implicitly tests the authenticated case as well.
+        """
+        url = reverse('markdownx_upload')
+
+        # A patch is required here because the view sets the
+        # MARKDOWNX_UPLOAD_ALLOW_ANONYMOUS at first import, reading from
+        # django.conf.settings once, which means Django's standard
+        # override_settings helper does not work. There's probably a case for
+        # re-working the app-local settings.
+        with mock.patch('markdownx.settings.MARKDOWNX_UPLOAD_ALLOW_ANONYMOUS', True):
+            with self._get_image_fp() as fp:
+                response = self.client.post(url, {'image': fp}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
 
         self.assertEqual(response.status_code, 200)
+        json = response.json()
         self.assertIn('image_code', json)
 
         match = re.findall(r'(markdownx/[\w\-]+\.png)', json['image_code'])

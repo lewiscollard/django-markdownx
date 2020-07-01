@@ -1,9 +1,10 @@
+from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, JsonResponse
 from django.utils.module_loading import import_string
 from django.views.generic.edit import View, BaseFormView
 
+from . import settings
 from .forms import ImageForm
-from .settings import MARKDOWNX_MARKDOWNIFY_FUNCTION
 
 
 class MarkdownifyView(View):
@@ -22,7 +23,7 @@ class MarkdownifyView(View):
         :return: HTTP response
         :rtype: django.http.HttpResponse
         """
-        markdownify = import_string(MARKDOWNX_MARKDOWNIFY_FUNCTION)
+        markdownify = import_string(settings.MARKDOWNX_MARKDOWNIFY_FUNCTION)
         return HttpResponse(markdownify(request.POST['content']))
 
 
@@ -34,6 +35,20 @@ class ImageUploadView(BaseFormView):
     # template_name = "dummy.html"
     form_class = ImageForm
     success_url = '/'
+
+    def dispatch(self, request, *args, **kwargs):
+        """
+        Raises PermissionDenied if the current user is not authenticated and
+        MARKDOWNX_UPLOAD_ALLOW_ANONYMOUS is not set.
+
+        :param request: Django request
+        :type request: django.http.request.HttpRequest
+        :rtype: django.http.JsonResponse, django.http.HttpResponse
+        """
+        if not settings.MARKDOWNX_UPLOAD_ALLOW_ANONYMOUS and not request.user.is_authenticated:
+            raise PermissionDenied
+
+        return super().dispatch(request, *args, **kwargs)
 
     def form_invalid(self, form):
         """
